@@ -21,9 +21,6 @@ RUN mkdir -p /app/data
 
 COPY --from=publish /app/publish .
 
-# EF Core migration tool
-RUN dotnet tool install --global dotnet-ef 2>/dev/null || true
-
 ENV ASPNETCORE_URLS=http://+:8080
 ENV DataPath=/app/data
 
