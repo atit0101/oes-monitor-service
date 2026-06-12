@@ -1,0 +1,218 @@
+name: oes-monitor
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # MonitorApi — .NET 8 Aggregator (health + topology + data quality)
+  # ──────────────────────────────────────────────────────────
+  monitor-api:
+    build:
+      context: ./MonitorApi
+      dockerfile: Dockerfile
+    container_name: monitor-api
+    ports:
+      - "${MONITOR_API_PORT:-5000}:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - MONITOR_ENV=DEV
+      - Monitoring__HostDev=${HOST_DEV:-43.229.77.19}
+      - Monitoring__HostUat=${HOST_UAT:-43.229.134.32}
+      - Mssql__HostDev=${MSSQL_HOST_DEV:-43.229.77.19}
+      - Mssql__PortDev=${MSSQL_PORT_DEV:-1433}
+      - Mssql__UserDev=${MSSQL_USER_DEV:-sa}
+      - Mssql__PasswordDev=${MSSQL_PASSWORD_DEV}
+      - Mssql__HostUat=${MSSQL_HOST_UAT:-43.229.134.32}
+      - Mssql__PortUat=${MSSQL_PORT_UAT:-1433}
+      - Mssql__UserUat=${MSSQL_USER_UAT:-sa}
+      - Mssql__PasswordUat=${MSSQL_PASSWORD_UAT}
+    volumes:
+      - monitor-data:/app/data
+    restart: unless-stopped
+    networks:
+      - monitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # Prometheus — Metrics storage (90-day retention)
+  # ──────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --storage.tsdb.retention.size=20GB
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+  # ──────────────────────────────────────────────────────────
+  # Blackbox Exporter — HTTP probing
+  # ──────────────────────────────────────────────────────────
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+  # ──────────────────────────────────────────────────────────
+  # cAdvisor — Container resource metrics
+  # ──────────────────────────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - "8088:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+  # ──────────────────────────────────────────────────────────
+  # SQL Exporter — MSSQL deep metrics
+  # ──────────────────────────────────────────────────────────
+  sql-exporter:
+    image: burningalchemist/sql_exporter:latest
+    container_name: sql-exporter
+    ports:
+      - "9399:9399"
+    environment:
+      - SQLEXPORTER_TARGET_DSN=sqlserver://${MSSQL_USER_DEV:-sa}:${MSSQL_PASSWORD_DEV}@${MSSQL_HOST_DEV:-43.229.77.19}:${MSSQL_PORT_DEV:-1433}
+    volumes:
+      - ./sql-exporter/config.yml:/etc/sql_exporter/config.yml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+  # ──────────────────────────────────────────────────────────
+  # Loki — Log storage
+  # ──────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+    networks:
+      - monitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O- http://localhost:3100/ready | grep -q ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # Promtail — Log collector จาก Docker containers
+  # ──────────────────────────────────────────────────────────
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────
+  # Grafana Tempo — Distributed trace storage
+  # ──────────────────────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/tmp/tempo
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+  # ──────────────────────────────────────────────────────────
+  # OpenTelemetry Collector — รับ traces จาก .NET services
+  # ──────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "4319:4317"   # OTLP gRPC (expose ต่างกันเพื่อไม่ชนกับ tempo)
+      - "4320:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus metrics ของ collector
+    volumes:
+      - ./otel-collector/otel-config.yml:/etc/otelcol-contrib/config.yaml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net
+    depends_on:
+      - tempo
+
+  # ──────────────────────────────────────────────────────────
+  # Grafana — Dashboard UI
+  # ──────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,yesoreyeram-infinity-datasource
+      - GF_FEATURE_TOGGLES_ENABLE=nodeGraph
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+      - monitor-api
+
+volumes:
+  monitor-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:
+
+networks:
+  monitor-net:
+    driver: bridge

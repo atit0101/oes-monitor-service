@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: OES Monitor Dashboards
+    orgId: 1
+    folder: OES Monitor
+    folderUid: oes-monitor
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

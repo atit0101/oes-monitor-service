@@ -1,0 +1,160 @@
+name: oes-monitor-uat
+
+services:
+
+  monitor-api:
+    build:
+      context: ./MonitorApi
+      dockerfile: Dockerfile
+    container_name: monitor-api-uat
+    ports:
+      - "${MONITOR_API_PORT:-5001}:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - MONITOR_ENV=UAT
+      - Monitoring__HostDev=${HOST_DEV:-43.229.77.19}
+      - Monitoring__HostUat=${HOST_UAT:-43.229.134.32}
+      - Mssql__HostDev=${MSSQL_HOST_DEV:-43.229.77.19}
+      - Mssql__PortDev=${MSSQL_PORT_DEV:-1433}
+      - Mssql__UserDev=${MSSQL_USER_DEV:-sa}
+      - Mssql__PasswordDev=${MSSQL_PASSWORD_DEV}
+      - Mssql__HostUat=${MSSQL_HOST_UAT:-43.229.134.32}
+      - Mssql__PortUat=${MSSQL_PORT_UAT:-1433}
+      - Mssql__UserUat=${MSSQL_USER_UAT:-sa}
+      - Mssql__PasswordUat=${MSSQL_PASSWORD_UAT}
+    volumes:
+      - monitor-data-uat:/app/data
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-uat
+    ports:
+      - "9091:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.uat.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data-uat:/prometheus
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter-uat
+    volumes:
+      - ./prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor-uat
+    ports:
+      - "8089:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  sql-exporter:
+    image: burningalchemist/sql_exporter:latest
+    container_name: sql-exporter-uat
+    environment:
+      - SQLEXPORTER_TARGET_DSN=sqlserver://${MSSQL_USER_UAT:-sa}:${MSSQL_PASSWORD_UAT}@${MSSQL_HOST_UAT:-43.229.134.32}:${MSSQL_PORT_UAT:-1433}
+    volumes:
+      - ./sql-exporter/config.yml:/etc/sql_exporter/config.yml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki-uat
+    ports:
+      - "3101:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data-uat:/loki
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail-uat
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo-uat
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3201:3200"
+      - "4321:4317"
+      - "4322:4318"
+    volumes:
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo.yaml:ro
+      - tempo-data-uat:/tmp/tempo
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-uat
+    ports:
+      - "4323:4317"
+      - "4324:4318"
+    volumes:
+      - ./otel-collector/otel-config.yml:/etc/otelcol-contrib/config.yaml:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-uat
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,yesoreyeram-infinity-datasource
+      - GF_FEATURE_TOGGLES_ENABLE=nodeGraph
+      - GF_USERS_DEFAULT_THEME=dark
+    volumes:
+      - grafana-data-uat:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    networks:
+      - monitor-net-uat
+
+volumes:
+  monitor-data-uat:
+  prometheus-data-uat:
+  loki-data-uat:
+  tempo-data-uat:
+  grafana-data-uat:
+
+networks:
+  monitor-net-uat:
+    driver: bridge

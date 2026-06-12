@@ -1,0 +1,127 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    monitor: oes-monitor
+    stack: dev
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []  # ใส่ alertmanager endpoint เมื่อ setup alerting
+
+scrape_configs:
+
+  # ──────────────────────────────────────────────────────────
+  # Prometheus self-monitoring
+  # ──────────────────────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  # ──────────────────────────────────────────────────────────
+  # MonitorApi — custom metrics (data quality violations etc.)
+  # ──────────────────────────────────────────────────────────
+  - job_name: monitor-api
+    static_configs:
+      - targets: [monitor-api:8080]
+    metrics_path: /metrics
+
+  # ──────────────────────────────────────────────────────────
+  # cAdvisor — Container resource metrics
+  # ──────────────────────────────────────────────────────────
+  - job_name: cadvisor
+    static_configs:
+      - targets: [cadvisor:8080]
+    metrics_path: /metrics
+
+  # ──────────────────────────────────────────────────────────
+  # SQL Exporter — MSSQL deep metrics
+  # ──────────────────────────────────────────────────────────
+  - job_name: sql-exporter
+    static_configs:
+      - targets: [sql-exporter:9399]
+
+  # ──────────────────────────────────────────────────────────
+  # OpenTelemetry Collector — collector self metrics
+  # ──────────────────────────────────────────────────────────
+  - job_name: otel-collector
+    static_configs:
+      - targets: [otel-collector:8889]
+
+  # ──────────────────────────────────────────────────────────
+  # Blackbox — HTTP health probing: DEV services
+  # ──────────────────────────────────────────────────────────
+  - job_name: dev-http-services
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://HOST_DEV:8080/health    # core-insurance
+          - http://HOST_DEV:8081/health    # core-oic
+          - http://HOST_DEV:8082/health    # user-service
+          - http://HOST_DEV:8083/health    # notification-service
+          - http://HOST_DEV:8084/health    # audit-log-service
+          - http://HOST_DEV:8085/health    # assessment-service
+          - http://HOST_DEV:4000           # oes-web-oic
+        labels:
+          environment: DEV
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ──────────────────────────────────────────────────────────
+  # Blackbox — HTTP health probing: UAT services
+  # ──────────────────────────────────────────────────────────
+  - job_name: uat-http-services
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://HOST_UAT:8080/health    # core-insurance UAT
+          - http://HOST_UAT:8081/health    # core-oic UAT
+          - http://HOST_UAT:8082/health    # user-service UAT
+          - http://HOST_UAT:8083/health    # notification-service UAT
+          - http://HOST_UAT:8084/health    # audit-log-service UAT
+          - http://HOST_UAT:8085/health    # assessment-service UAT
+          - http://HOST_UAT:4000           # oes-web-oic UAT
+        labels:
+          environment: UAT
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ──────────────────────────────────────────────────────────
+  # Blackbox — SSL certificate expiry monitoring
+  # ──────────────────────────────────────────────────────────
+  - job_name: ssl-certs
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://oesweb.co
+          - https://uat.oesweb.co
+          - https://oes-iwt.oic.or.th
+        labels:
+          type: ssl
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

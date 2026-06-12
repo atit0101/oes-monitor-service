@@ -1,0 +1,20 @@
+# Environment
+.env
+.env.uat
+
+# .NET
+MonitorApi/bin/
+MonitorApi/obj/
+
+# Data
+*.db
+*.db-shm
+*.db-wal
+
+# Docker volumes (ถ้า mount local)
+data/
+
+# VS / Rider
+.vs/
+.idea/
+*.user

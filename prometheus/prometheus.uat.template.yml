@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    monitor: oes-monitor
+    stack: uat
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  - job_name: monitor-api
+    static_configs:
+      - targets: [monitor-api-uat:8080]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: [cadvisor-uat:8080]
+
+  - job_name: sql-exporter
+    static_configs:
+      - targets: [sql-exporter-uat:9399]
+
+  - job_name: uat-http-services
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://HOST_UAT:8080/health
+          - http://HOST_UAT:8081/health
+          - http://HOST_UAT:8082/health
+          - http://HOST_UAT:8083/health
+          - http://HOST_UAT:8084/health
+          - http://HOST_UAT:8085/health
+          - http://HOST_UAT:4000
+        labels:
+          environment: UAT
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter-uat:9115

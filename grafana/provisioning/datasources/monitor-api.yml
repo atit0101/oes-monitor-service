@@ -1,0 +1,11 @@
+apiVersion: 1
+
+datasources:
+  - name: MonitorAPI
+    type: yesoreyeram-infinity-datasource
+    uid: monitor-api
+    access: proxy
+    jsonData:
+      base_url: http://monitor-api:8080
+      allowedHosts:
+        - http://monitor-api:8080

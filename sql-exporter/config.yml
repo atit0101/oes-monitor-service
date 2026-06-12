@@ -1,0 +1,96 @@
+global:
+  scrape_timeout: 10s
+  scrape_timeout_offset: 500ms
+  min_interval: 0s
+  max_connections: 3
+  max_idle_connections: 3
+
+jobs:
+  - name: mssql_performance
+    interval: 60s
+    connections:
+      - "$(SQLEXPORTER_TARGET_DSN)"
+
+    queries:
+
+      # ── Slow queries (avg > 500ms) ──────────────────────────
+      - name: mssql_slow_queries
+        help: "Top slow queries by average elapsed time"
+        labels: [query_preview]
+        values: [avg_elapsed_ms, execution_count]
+        query: |
+          SELECT TOP 10
+            CAST(total_elapsed_time / NULLIF(execution_count, 0) / 1000.0 AS DECIMAL(10,2)) AS avg_elapsed_ms,
+            execution_count,
+            SUBSTRING(REPLACE(REPLACE(st.text, CHAR(13), ' '), CHAR(10), ' '), 1, 80) AS query_preview
+          FROM sys.dm_exec_query_stats qs
+          CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+          WHERE total_elapsed_time / NULLIF(execution_count, 0) > 500000
+          ORDER BY avg_elapsed_ms DESC
+
+      # ── Active connections per DB ───────────────────────────
+      - name: mssql_connections_per_db
+        help: "Number of active connections per database"
+        labels: [database_name]
+        values: [connection_count]
+        query: |
+          SELECT
+            DB_NAME(database_id) AS database_name,
+            COUNT(*) AS connection_count
+          FROM sys.dm_exec_sessions
+          WHERE is_user_process = 1 AND database_id > 0
+          GROUP BY database_id
+
+      # ── Deadlock count ──────────────────────────────────────
+      - name: mssql_deadlocks_total
+        help: "Total deadlocks since last restart"
+        values: [deadlock_count]
+        query: |
+          SELECT cntr_value AS deadlock_count
+          FROM sys.dm_os_performance_counters
+          WHERE counter_name = 'Number of Deadlocks/sec'
+            AND instance_name = '_Total'
+
+      # ── Database sizes ──────────────────────────────────────
+      - name: mssql_database_size_mb
+        help: "Database size in MB"
+        labels: [database_name]
+        values: [size_mb]
+        query: |
+          SELECT
+            name AS database_name,
+            SUM(size) * 8 / 1024 AS size_mb
+          FROM sys.master_files
+          GROUP BY name
+
+      # ── Blocked processes ───────────────────────────────────
+      - name: mssql_blocked_processes
+        help: "Number of currently blocked processes"
+        values: [blocked_count]
+        query: |
+          SELECT COUNT(*) AS blocked_count
+          FROM sys.dm_exec_requests
+          WHERE blocking_session_id > 0
+
+      # ── TempDB usage ────────────────────────────────────────
+      - name: mssql_tempdb_usage_mb
+        help: "TempDB space used in MB"
+        values: [used_mb, free_mb]
+        query: |
+          SELECT
+            SUM(user_object_reserved_page_count + internal_object_reserved_page_count + version_store_reserved_page_count) * 8 / 1024 AS used_mb,
+            SUM(unallocated_extent_page_count) * 8 / 1024 AS free_mb
+          FROM sys.dm_db_file_space_usage
+
+      # ── Buffer cache hit ratio ──────────────────────────────
+      - name: mssql_buffer_cache_hit_ratio
+        help: "Buffer cache hit ratio (higher is better)"
+        values: [ratio]
+        query: |
+          SELECT
+            CAST(a.cntr_value AS FLOAT) / NULLIF(b.cntr_value, 0) * 100 AS ratio
+          FROM sys.dm_os_performance_counters a
+          JOIN sys.dm_os_performance_counters b
+            ON b.counter_name = 'Buffer cache hit ratio base'
+            AND b.object_name = a.object_name
+          WHERE a.counter_name = 'Buffer cache hit ratio'

@@ -1,0 +1,96 @@
+groups:
+  - name: service-health
+    interval: 30s
+    rules:
+
+      - alert: ServiceDown
+        expr: probe_success{job=~"dev-http-services|uat-http-services"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 Service DOWN: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} ({{ $labels.environment }}) ไม่ตอบสนองมากกว่า 2 นาที"
+
+      - alert: HighResponseTime
+        expr: probe_duration_seconds{job=~"dev-http-services|uat-http-services"} > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "🟡 Response time สูง: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} response time = {{ $value | humanizeDuration }} (threshold: 2s)"
+
+      - alert: SSLCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "🔒 SSL cert ใกล้หมดอายุ: {{ $labels.instance }}"
+          description: "SSL cert จะหมดอายุใน {{ $value | humanizeDuration }}"
+
+  - name: database-health
+    rules:
+
+      - alert: DBConnectionFailed
+        expr: monitor_db_check_healthy == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 DB Connection FAILED: {{ $labels.service }}"
+          description: "{{ $labels.service }} ({{ $labels.environment }}) ต่อ database ไม่ได้"
+
+      - alert: DBNameMismatch
+        expr: monitor_db_name_match == 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "⚠️ DB Name ไม่ตรง: {{ $labels.service }}"
+          description: "{{ $labels.service }} เชื่อมต่อผิด database ({{ $labels.actual_db }} ≠ {{ $labels.expected_db }})"
+
+  - name: data-quality
+    rules:
+
+      - alert: DataQualityCritical
+        expr: monitor_data_quality_violations{severity="critical"} > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🚨 Data Quality Critical: {{ $labels.rule }}"
+          description: "พบ {{ $value }} violations สำหรับ rule: {{ $labels.rule }} ({{ $labels.environment }})"
+
+      - alert: DataQualityWarning
+        expr: monitor_data_quality_violations{severity="warning"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Data Quality Warning: {{ $labels.rule }}"
+          description: "พบ {{ $value }} violations สำหรับ rule: {{ $labels.rule }}"
+
+  - name: container-resources
+    rules:
+
+      - alert: HighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{name!=""} / container_spec_memory_limit_bytes{name!=""}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "📊 Memory สูง: {{ $labels.name }}"
+          description: "Container {{ $labels.name }} ใช้ memory {{ $value | humanizePercentage }}"
+
+      - alert: HighCPUUsage
+        expr: |
+          rate(container_cpu_usage_seconds_total{name!=""}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "📊 CPU สูง: {{ $labels.name }}"
+          description: "Container {{ $labels.name }} ใช้ CPU {{ $value | humanize }}%"
