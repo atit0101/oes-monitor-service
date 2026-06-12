@@ -1,14 +1,7 @@
-# Exclude ทุกอย่างก่อน แล้วค่อย allow เฉพาะที่ต้องการ
-*
-
-# Allow source files
-!MonitorApi.csproj
-!Program.cs
-!appsettings.json
-
-# Allow source directories
-!Controllers/
-!Data/
-!Models/
-!Services/
-!Workers/
+bin/
+obj/
+.vs/
+.vscode/
+*.db
+*.db-shm
+*.db-wal
