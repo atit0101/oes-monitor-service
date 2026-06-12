@@ -11,8 +11,8 @@ MonitorApi/obj/
 *.db-shm
 *.db-wal
 
-# Docker volumes (ถ้า mount local)
-data/
+# Docker volumes (ถ้า mount local) — anchor to root เพื่อไม่ให้ ignore MonitorApi/Data/
+/data/
 
 # VS / Rider
 .vs/
