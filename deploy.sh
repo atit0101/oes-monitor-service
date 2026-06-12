@@ -62,9 +62,13 @@ echo "   ✅ $PROM_OUTPUT พร้อมแล้ว (HOST_DEV=${HOST_DEV}, HOS
 # ── Create Grafana dashboard folder ────────────────────────
 mkdir -p grafana/provisioning/dashboards/json
 
+# ── Build monitor-api (no-cache เพื่อหลีกเลี่ยง stale layer) ──
+echo "🔨 Building monitor-api..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache monitor-api
+
 # ── Deploy ─────────────────────────────────────────────────
 echo "🚀 Starting $ENV stack..."
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
 echo ""
 echo "✅ OES Monitor ($ENV) is running!"

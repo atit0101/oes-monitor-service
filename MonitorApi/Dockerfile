@@ -7,7 +7,15 @@ WORKDIR /src
 COPY ["MonitorApi.csproj", "."]
 RUN dotnet restore
 
-COPY . .
+# Copy source directories explicitly — หลีกเลี่ยง cache ที่ค้างจาก bin/obj
+COPY Controllers/  Controllers/
+COPY Data/         Data/
+COPY Models/       Models/
+COPY Services/     Services/
+COPY Workers/      Workers/
+COPY Program.cs    .
+COPY appsettings.json .
+
 RUN dotnet build -c Release -o /app/build
 
 FROM build AS publish
